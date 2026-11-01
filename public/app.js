@@ -1,7 +1,20 @@
+const SUPABASE_URL = 'https://lhlmoysvbjggwkrqjwup.supabase.co';
+// Must be the publishable key and never the secret key
+const SUPABASE_KEY = 'sb_publishable_nqehKsuiNMuD7qzkPkTJOQ_Ow0Uy4Bh';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
 let topics = [];
 let selectedId = null;
 let saveTimer = null;
 
+const loginEl = document.getElementById('login');
+const loginFormEl = document.getElementById('loginForm');
+const emailEl = document.getElementById('loginEmail');
+const passwordEl = document.getElementById('loginPassword');
+const loginMsgEl = document.getElementById('loginMsg');
+
+const headerEl = document.querySelector('.app-header');
+const mainEl = document.querySelector('main');
 const domainsEl = document.getElementById('domains');
 const panelEl = document.getElementById('panel');
 const backdropEl = document.getElementById('panel-backdrop');
@@ -13,15 +26,59 @@ const metaEl = document.getElementById('meta');
 const statsEl = document.getElementById('stats');
 const mobileFabEl = document.getElementById('mobile-fab');
 const fabTopicNameEl = document.getElementById('fab-topic-name');
+const logoutBtnEl = document.getElementById('logout');
+const exportBtnEl = document.getElementById('export');
+
+function showApp() {
+  loginEl.hidden = true;
+  headerEl.hidden = false;
+  mainEl.hidden = false;
+  backdropEl.hidden = false;
+  if (mobileFabEl) mobileFabEl.hidden = false;
+}
+
+function showLogin() {
+  loginEl.hidden = false;
+  headerEl.hidden = true;
+  mainEl.hidden = true;
+  backdropEl.hidden = true;
+  if (mobileFabEl) mobileFabEl.hidden = true;
+}
+
+function clearDomTopics() {
+  domainsEl.innerHTML = '';
+  if (statsEl) statsEl.innerHTML = '';
+  titleEl.textContent = 'Pick a topic';
+  metaEl.textContent = 'Click a pill to read and edit its note.';
+  noteEl.value = '';
+  noteEl.disabled = true;
+  toggleEl.disabled = true;
+  toggleEl.textContent = 'Mark as covered';
+  toggleEl.classList.remove('covered');
+  if (fabTopicNameEl) fabTopicNameEl.textContent = '';
+}
 
 async function load() {
   try {
-    const res = await fetch('/api/topics');
-    topics = await res.json();
+    const { data, error } = await sb.from('gh900_topics').select('*').order('id');
+    if (error) {
+      console.error('Failed to load topics', error);
+      domainsEl.innerHTML = '';
+      const p = document.createElement('p');
+      p.style.color = 'var(--muted)';
+      p.textContent = error.message || 'Failed to load topics.';
+      domainsEl.append(p);
+      return;
+    }
+    topics = data || [];
     render();
   } catch (err) {
     console.error('Failed to load topics', err);
-    domainsEl.innerHTML = '<p style="color:var(--muted)">Failed to load topics. Is the server running?</p>';
+    domainsEl.innerHTML = '';
+    const p = document.createElement('p');
+    p.style.color = 'var(--muted)';
+    p.textContent = err.message || 'Failed to load topics.';
+    domainsEl.append(p);
   }
 }
 
@@ -116,8 +173,8 @@ function select(id) {
   if (!t) return;
 
   titleEl.textContent = t.name;
-  metaEl.textContent = t.updated_at ? 'Last saved ' + t.updated_at + ' UTC' : 'No note yet.';
-  noteEl.value = t.note;
+  metaEl.textContent = t.updated_at ? 'Last saved ' + new Date(t.updated_at).toLocaleString() : 'No note yet.';
+  noteEl.value = t.note || '';
   noteEl.disabled = false;
   toggleEl.disabled = false;
   toggleEl.textContent = t.covered ? 'Mark as not covered' : 'Mark as covered';
@@ -134,22 +191,38 @@ function select(id) {
 async function save(t) {
   if (!t) return;
   try {
-    const res = await fetch('/api/topics/' + t.id, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note: t.note, covered: t.covered }),
-    });
-    if (t.id === selectedId) metaEl.textContent = res.ok ? 'Saved' : 'Save failed.';
-  } catch {
-    if (t.id === selectedId) metaEl.textContent = 'Save failed. Is the server running?';
+    const { data, error } = await sb
+      .from('gh900_topics')
+      .update({
+        note: t.note,
+        covered: t.covered,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', t.id)
+      .select();
+
+    if (error) {
+      if (t.id === selectedId) metaEl.textContent = 'Save failed: ' + error.message;
+      return;
+    }
+
+    if (!data || data.length !== 1) {
+      if (t.id === selectedId) metaEl.textContent = 'Save failed: unauthorized or row not found';
+      return;
+    }
+
+    t.updated_at = data[0].updated_at;
+    if (t.id === selectedId) metaEl.textContent = 'Saved';
+  } catch (err) {
+    if (t.id === selectedId) metaEl.textContent = 'Save failed: ' + (err.message || 'network error');
   }
 }
 
-function flushSave() {
+async function flushSave() {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
-    save(current());
+    await save(current());
   }
 }
 
@@ -168,7 +241,7 @@ noteEl.addEventListener('input', () => {
 toggleEl.addEventListener('click', () => {
   const t = current();
   if (!t) return;
-  t.covered = t.covered ? 0 : 1;
+  t.covered = !t.covered;
   toggleEl.textContent = t.covered ? 'Mark as not covered' : 'Mark as covered';
   if (t.covered) {
     toggleEl.classList.add('covered');
@@ -184,19 +257,64 @@ toggleEl.addEventListener('click', () => {
   save(t);
 });
 
-document.getElementById('export').addEventListener('click', async () => {
-  if (saveTimer) {
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    await save(current());
+exportBtnEl.addEventListener('click', async () => {
+  await flushSave();
+  let md = '# GH-900 notes\n';
+  let lastDomain = null;
+  for (const t of topics) {
+    if (t.domain !== lastDomain) {
+      md += `\n## ${t.domain}\n`;
+      lastDomain = t.domain;
+    }
+    md += `\n### ${t.name}\n\n${t.covered ? 'Covered' : 'Not covered yet'}\n`;
+    if (t.note && t.note.trim()) {
+      md += `\n${t.note.trim()}\n`;
+    }
   }
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'notes.md';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  metaEl.textContent = 'Exported ' + topics.length + ' topics to notes.md';
+});
+
+loginFormEl.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  loginMsgEl.textContent = '';
+  const email = emailEl.value.trim();
+  const password = passwordEl.value;
+
   try {
-    const res = await fetch('/api/export', { method: 'POST' });
-    const data = await res.json();
-    metaEl.textContent = res.ok ? 'Exported ' + data.topics + ' topics to notes.md' : 'Export failed.';
-  } catch {
-    metaEl.textContent = 'Export failed. Is the server running?';
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      loginMsgEl.textContent = error.message;
+      return;
+    }
+    passwordEl.value = '';
+    showApp();
+    await load();
+  } catch (err) {
+    loginMsgEl.textContent = err.message || 'Login failed';
   }
+});
+
+logoutBtnEl.addEventListener('click', async () => {
+  await flushSave();
+  try {
+    await sb.auth.signOut();
+  } catch (err) {
+    console.error('Sign out error', err);
+  }
+  topics = [];
+  selectedId = null;
+  closePanel();
+  clearDomTopics();
+  showLogin();
 });
 
 closeBtnEl.addEventListener('click', closePanel);
@@ -213,4 +331,21 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-load();
+async function init() {
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      showApp();
+      await load();
+    } else {
+      clearDomTopics();
+      showLogin();
+    }
+  } catch (err) {
+    console.error('Session check failed', err);
+    clearDomTopics();
+    showLogin();
+  }
+}
+
+init();
