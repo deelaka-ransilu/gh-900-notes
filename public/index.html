@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>GH-900 Notes Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-content">
+      <h1>GH-900 Study Tracker</h1>
+      <div id="stats" class="stats-badge">Loading topics...</div>
+    </div>
+  </header>
+
+  <!-- Mobile Backdrop Overlay -->
+  <div id="panel-backdrop" class="panel-backdrop"></div>
+
+  <main>
+    <section id="domains"></section>
+
+    <!-- Note panel (Sticky sidebar on desktop, slide-up sheet on mobile) -->
+    <aside id="panel">
+      <div class="panel-handle"></div>
+      <div class="panel-header">
+        <h2 id="title">Pick a topic</h2>
+        <button type="button" id="close-panel" class="close-btn" title="Close panel" aria-label="Close note panel">✕</button>
+      </div>
+      <p id="meta">Click a pill to read and edit its note.</p>
+      <textarea id="note" disabled placeholder="Type your study notes here... (autosaved)"></textarea>
+      <div class="actions">
+        <button id="toggle" disabled>Mark as covered</button>
+        <button id="export">Export to notes.md</button>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Mobile floating bar when a note is active but panel is closed -->
+  <div id="mobile-fab" class="mobile-fab hidden">
+    <div class="mobile-fab-text">📝 <span id="fab-topic-name">Topic</span></div>
+    <button type="button" class="mobile-fab-btn">Open Note</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
