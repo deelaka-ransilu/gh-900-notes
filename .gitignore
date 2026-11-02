@@ -2,3 +2,4 @@ node_modules/
 *.db
 collected-*.txt
 project-structure.txt
+HANDOFF.md
